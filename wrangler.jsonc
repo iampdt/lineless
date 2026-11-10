@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lineless",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    // The web app is a single-page app; only the API reaches the Worker.
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "durable_objects": {
+    "bindings": [
+      // One object per queue: every change to a queue runs in that queue's object, one at a time.
+      { "name": "QUEUES", "class_name": "QueueObject" },
+      // One object per client address hash, counting queue creations.
+      { "name": "LIMITERS", "class_name": "RateLimiter" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["QueueObject", "RateLimiter"] }],
+  "observability": { "enabled": true }
+}

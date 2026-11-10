@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --color-canvas: #f6f5f1;
+  --color-surface: #ffffff;
+  --color-ink: #15171c;
+  --color-muted: #5e6470;
+  --color-faint: #8b909a;
+  --color-line: #e3e1da;
+  --color-brand: #0d7a5f;
+  --color-brand-strong: #0a634d;
+  --color-brand-soft: #e2f2eb;
+  --color-warn: #a2560b;
+  --color-warn-soft: #fbf0e1;
+  --color-danger: #b42318;
+  --color-danger-soft: #fdecea;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-canvas text-ink antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand;
+  }
+}
+
+/* Shared building blocks. Utilities (not a components layer) so they compose with @apply. */
+@utility card {
+  @apply rounded-2xl border border-line bg-surface;
+}
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+}
+@utility btn-primary {
+  @apply btn bg-brand text-white hover:bg-brand-strong;
+}
+@utility btn-secondary {
+  @apply btn border border-line bg-surface text-ink hover:bg-canvas;
+}
+@utility btn-quiet {
+  @apply btn text-muted hover:bg-canvas hover:text-ink;
+}
+@utility input {
+  @apply w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-base text-ink placeholder:text-faint focus:border-brand focus:outline-none;
+}
+@utility label {
+  @apply mb-1.5 block text-sm font-medium text-ink;
+}
+@utility pill {
+  @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgb(255 255 255 / 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 28px rgb(255 255 255 / 0);
+  }
+}
+
+.pulse-ring {
+  animation: pulse-ring 1.6s ease-out infinite;
+}
+
+@keyframes flash {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  20% {
+    background-color: rgb(13 122 95 / 0.35);
+  }
+}
+
+.flash {
+  animation: flash 1.8s ease-out 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-ring,
+  .flash {
+    animation: none;
+  }
+}
