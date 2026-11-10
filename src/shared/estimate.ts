@@ -35,3 +35,18 @@ export function waitRange(position: number, pace: Pace, elapsed = 0): WaitRange 
   const middle = expectedWait(position, pace, elapsed);
   return { low: middle * RANGE_LOW, high: middle * RANGE_HIGH };
 }
+
+/** Slack on both ends of the range: nobody minds a minute either way. */
+const SLACK_SECONDS = 60;
+
+/**
+ * Whether a real wait fell inside the range shown for an estimate. Waits under two minutes are
+ * shown as "under a minute"-ish, so both being short counts as right.
+ */
+export function withinRange(estimateSeconds: number, actualSeconds: number): boolean {
+  if (estimateSeconds < 120 && actualSeconds < 120) return true;
+  return (
+    actualSeconds >= estimateSeconds * RANGE_LOW - SLACK_SECONDS &&
+    actualSeconds <= estimateSeconds * RANGE_HIGH + SLACK_SECONDS
+  );
+}

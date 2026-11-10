@@ -49,6 +49,14 @@ export interface TicketView {
   recalls: number;
 }
 
+/** How the wait shown at joining compared with the real wait. */
+export interface EstimateStats {
+  people: number;
+  /** Share whose real wait fell inside the range shown, 0–1; null before anyone is scored. */
+  withinRange: number | null;
+  averageErrorSeconds: number | null;
+}
+
 export interface SessionStats {
   startedAt: number;
   served: number;
@@ -56,6 +64,7 @@ export interface SessionStats {
   left: number;
   averageWaitSeconds: number | null;
   averageServiceSeconds: number | null;
+  estimates: EstimateStats;
 }
 
 /** What the staff console sees, on top of the queue view. */
@@ -65,6 +74,8 @@ export interface StaffView {
   /** Missed in the last two hours, newest first. */
   missed: TicketView[];
   stats: SessionStats;
+  /** Over the queue's whole life: what a trial reports. */
+  totals: { served: number; estimates: EstimateStats };
   autoServe: boolean;
 }
 
@@ -96,6 +107,7 @@ export const PONG = '{"type":"pong"}';
 
 export type Command =
   | { type: "join"; device: string; name?: string }
+  | { type: "add_ticket"; name?: string }
   | { type: "leave"; ticketId: string; device: string }
   | { type: "call_next"; counterId: string; expectServing: string | null }
   | { type: "recall"; ticketId: string }

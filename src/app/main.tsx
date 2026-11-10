@@ -4,6 +4,7 @@ import { Centered, Footer, Header } from "./components/ui";
 import { Display } from "./pages/Display";
 import { Home } from "./pages/Home";
 import { Join } from "./pages/Join";
+import { Poster } from "./pages/Poster";
 import { Staff } from "./pages/Staff";
 import { Link, match, usePath } from "./router";
 import "./styles.css";
@@ -19,6 +20,8 @@ function App() {
       return <Staff code={route.code} />;
     case "display":
       return <Display code={route.code} />;
+    case "poster":
+      return <Poster code={route.code} />;
     case "missing":
       return (
         <div className="min-h-screen">

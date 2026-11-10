@@ -30,6 +30,15 @@ export interface Ticket {
   recalls: number;
   /** Joined by the demo's simulated customers. */
   simulated: boolean;
+  /** The expected wait shown when they joined, scored against the real one; null if brought back. */
+  estimateSeconds: number | null;
+}
+
+/** How the wait shown at joining compared with the real wait. */
+export interface Accuracy {
+  people: number;
+  withinRange: number;
+  errorTotalSeconds: number;
 }
 
 /** Totals since the queue last opened, for the staff console. */
@@ -42,6 +51,13 @@ export interface Session {
   waitCount: number;
   serviceTotalMs: number;
   serviceCount: number;
+  estimates: Accuracy;
+}
+
+/** Totals over the queue's whole life, kept across sessions: what a trial reports. */
+export interface Totals {
+  served: number;
+  estimates: Accuracy;
 }
 
 export interface QueueConfig {
@@ -60,6 +76,7 @@ export interface QueueConfig {
   estimator: EstimatorState;
   lastActivityAt: number;
   autoServe: boolean;
+  totals: Totals;
 }
 
 /**
@@ -74,6 +91,10 @@ export interface QueueState {
 
 /** Finished tickets stay in the working set this long. */
 export const RECENT_MS = 2 * 60 * 60 * 1000;
+
+export function emptyAccuracy(): Accuracy {
+  return { people: 0, withinRange: 0, errorTotalSeconds: 0 };
+}
 
 export function isActive(ticket: Ticket): boolean {
   return ticket.status === "waiting" || ticket.status === "called";

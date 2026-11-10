@@ -3,7 +3,7 @@
 // ids for a day; events are an append-only log of what happened.
 
 import type { QueueEvent } from "../domain/queue";
-import { type QueueConfig, type QueueState, RECENT_MS, type Ticket } from "../domain/model";
+import { emptyAccuracy, type QueueConfig, type QueueState, RECENT_MS, type Ticket } from "../domain/model";
 import type { CommandResult, TicketStatus } from "../shared/protocol";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -31,7 +31,8 @@ export function migrate(sql: SqlStorage): void {
     called_at INTEGER,
     finished_at INTEGER,
     recalls INTEGER NOT NULL,
-    simulated INTEGER NOT NULL
+    simulated INTEGER NOT NULL,
+    estimate_seconds INTEGER
   )`);
   sql.exec("CREATE INDEX IF NOT EXISTS tickets_by_status ON tickets (status, finished_at)");
   sql.exec(`CREATE TABLE IF NOT EXISTS requests (
@@ -49,12 +50,21 @@ export function migrate(sql: SqlStorage): void {
   )`);
 }
 
+/** Bring a queue created by an older version up to date. Cheap when there's nothing to do. */
+function upgrade(sql: SqlStorage): void {
+  const columns = sql.exec("SELECT * FROM tickets LIMIT 0").columnNames;
+  if (!columns.includes("estimate_seconds")) sql.exec("ALTER TABLE tickets ADD COLUMN estimate_seconds INTEGER");
+}
+
 /** The working set: configuration, tickets in play, and tickets finished recently. */
 export function readState(sql: SqlStorage, now: number): QueueState | null {
   if (!exists(sql)) return null;
   const row = sql.exec<{ config: string }>("SELECT config FROM queue WHERE id = 1").toArray()[0];
   if (!row) return null;
+  upgrade(sql);
   const config = JSON.parse(row.config) as QueueConfig;
+  config.session.estimates ??= emptyAccuracy();
+  config.totals ??= { served: config.session.served, estimates: emptyAccuracy() };
   const rows = sql
     .exec<TicketRow>(
       "SELECT * FROM tickets WHERE status IN ('waiting', 'called') OR finished_at > ?",
@@ -81,11 +91,11 @@ export function saveTickets(sql: SqlStorage, tickets: Ticket[]): void {
   for (const t of tickets) {
     sql.exec(
       `INSERT INTO tickets (id, number, name, device_hash, status, counter_id, sort, joined_at, called_at,
-         finished_at, recalls, simulated)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         finished_at, recalls, simulated, estimate_seconds)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (id) DO UPDATE SET status = excluded.status, counter_id = excluded.counter_id,
          sort = excluded.sort, called_at = excluded.called_at, finished_at = excluded.finished_at,
-         recalls = excluded.recalls`,
+         recalls = excluded.recalls, estimate_seconds = excluded.estimate_seconds`,
       t.id,
       t.number,
       t.name,
@@ -98,6 +108,7 @@ export function saveTickets(sql: SqlStorage, tickets: Ticket[]): void {
       t.finishedAt,
       t.recalls,
       t.simulated ? 1 : 0,
+      t.estimateSeconds,
     );
   }
 }
@@ -153,6 +164,7 @@ type TicketRow = {
   finished_at: number | null;
   recalls: number;
   simulated: number;
+  estimate_seconds: number | null;
 };
 
 function fromRow(r: TicketRow): Ticket {
@@ -169,5 +181,30 @@ function fromRow(r: TicketRow): Ticket {
     finishedAt: r.finished_at,
     recalls: r.recalls,
     simulated: r.simulated === 1,
+    estimateSeconds: r.estimate_seconds ?? null,
   };
 }
+
+/**
+ * Every ticket still stored (finished ones are kept 7 days), oldest first, for the staff report.
+ * Names and device hashes are left out on purpose.
+ */
+export function reportRows(sql: SqlStorage): ReportRow[] {
+  return sql
+    .exec<ReportRow>(
+      `SELECT number, status, counter_id, joined_at, called_at, finished_at, estimate_seconds, simulated
+       FROM tickets ORDER BY joined_at, number`,
+    )
+    .toArray();
+}
+
+export type ReportRow = {
+  number: number;
+  status: string;
+  counter_id: string | null;
+  joined_at: number;
+  called_at: number | null;
+  finished_at: number | null;
+  estimate_seconds: number | null;
+  simulated: number;
+};

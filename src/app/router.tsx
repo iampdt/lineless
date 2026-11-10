@@ -42,14 +42,16 @@ export type Route =
   | { page: "join"; code: string }
   | { page: "staff"; code: string }
   | { page: "display"; code: string }
+  | { page: "poster"; code: string }
   | { page: "missing" };
 
 export function match(path: string): Route {
   if (path === "/" || path === "") return { page: "home" };
-  const queue = /^\/q\/([A-Za-z0-9]{6})(?:\/(staff|display))?\/?$/.exec(path);
+  const queue = /^\/q\/([A-Za-z0-9]{6})(?:\/(staff|display|poster))?\/?$/.exec(path);
   if (!queue) return { page: "missing" };
   const code = queue[1]!.toUpperCase();
   if (queue[2] === "staff") return { page: "staff", code };
   if (queue[2] === "display") return { page: "display", code };
+  if (queue[2] === "poster") return { page: "poster", code };
   return { page: "join", code };
 }

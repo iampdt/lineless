@@ -50,6 +50,7 @@ refused with 422.
 | --- | --- | --- |
 | `join {device, name?}` | anyone | A ticket at the back of the line, or this device's existing ticket |
 | `leave {ticketId, device}` | the ticket's device | Leave the line, freeing the counter if called |
+| `add_ticket {name?}` | staff | A number for someone without a phone; allowed while joining is paused |
 | `call_next {counterId, expectServing}` | staff | Finish whoever is at the counter, call the next person. Refused with 409 `counter_changed` unless `expectServing` is who the counter is serving |
 | `recall {ticketId}` | staff | Call the same person again; screens chime |
 | `finish {ticketId}` | staff | Done with this person, call nobody yet |
@@ -75,6 +76,13 @@ Answers: `{"type": "joined", "ticket": {"id", "number"}, "existing"}`,
 | `counter_changed`, `ticket_changed`, `counter_busy` | 409 | The screen is behind; refresh and retry |
 | `request_reused` | 422 | Request id used for a different command |
 | `rate_limited` | 429 | Too many joins or creations from this address |
+
+## The staff report
+
+`GET /api/q/:code/report` with the staff key returns CSV: one row per stored ticket (finished
+ones are kept 7 days) with `number, status, counter, joined_at, called_at, finished_at,
+waited_minutes, shown_minutes, within_range, simulated`. No names, no device ids. Cells that a
+spreadsheet would run as a formula are defused.
 
 ## Live updates
 

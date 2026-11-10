@@ -19,7 +19,7 @@ import { DEFAULT_ESTIMATOR, type EstimatorOptions } from "../src/domain/estimate
 import { type QueueState, waitingInOrder } from "../src/domain/model";
 import { apply, createQueue } from "../src/domain/queue";
 import { queueView } from "../src/domain/views";
-import { expectedWait, RANGE_HIGH, RANGE_LOW } from "../src/shared/estimate";
+import { expectedWait, RANGE_HIGH, RANGE_LOW, withinRange } from "../src/shared/estimate";
 import type { Command } from "../src/shared/protocol";
 
 const MINUTE = 60_000;
@@ -270,14 +270,10 @@ interface Score {
 }
 
 function score(predictions: Prediction[]): Score {
-  // Waits under two minutes are scored as close enough either way: "under a minute" is shown.
   const errors = predictions.map((p) => Math.abs(p.actual - p.predicted) / MINUTE).sort((a, b) => a - b);
   const bias = predictions.reduce((sum, p) => sum + (p.predicted - p.actual), 0) / predictions.length / MINUTE;
-  const inRange = predictions.filter(
-    (p) =>
-      (p.actual >= p.predicted * RANGE_LOW - MINUTE && p.actual <= p.predicted * RANGE_HIGH + MINUTE) ||
-      (p.predicted < 2 * MINUTE && p.actual < 2 * MINUTE),
-  ).length;
+  // The same test the staff screen's accuracy figure uses.
+  const inRange = predictions.filter((p) => withinRange(p.predicted / 1000, p.actual / 1000)).length;
   const ratios = predictions
     .filter((p) => p.predicted >= 5 * MINUTE)
     .map((p) => p.actual / p.predicted)

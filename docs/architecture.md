@@ -95,7 +95,7 @@ One SQLite database per queue:
 | Table | Holds | Kept |
 | --- | --- | --- |
 | `queue` | One row: configuration, counters, session totals, estimator state, version | While the queue exists |
-| `tickets` | One row per ticket | Finished tickets: 7 days |
+| `tickets` | One row per ticket, with the wait it was shown at joining | Finished tickets: 7 days |
 | `requests` | Request id → fingerprint and answer | 1 day |
 | `events` | Append-only log: joined, called, served, missed… | 30 days |
 

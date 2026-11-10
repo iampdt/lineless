@@ -2,9 +2,9 @@
 // screen never receive anyone's name.
 
 import type { Pace } from "../shared/estimate";
-import type { QueueView, StaffView, TicketView, YouView } from "../shared/protocol";
+import type { EstimateStats, QueueView, StaffView, TicketView, YouView } from "../shared/protocol";
 import { pace } from "./estimate";
-import { type QueueState, RECENT_MS, type Ticket, waitingInOrder } from "./model";
+import { type Accuracy, type QueueState, RECENT_MS, type Ticket, waitingInOrder } from "./model";
 
 export function queueView(state: QueueState, now: number): QueueView {
   const { config } = state;
@@ -50,8 +50,19 @@ export function staffView(state: QueueState, now: number): StaffView {
       averageServiceSeconds: session.serviceCount
         ? Math.round(session.serviceTotalMs / session.serviceCount / 1000)
         : null,
+      estimates: estimateStats(session.estimates),
     },
+    totals: { served: state.config.totals.served, estimates: estimateStats(state.config.totals.estimates) },
     autoServe: state.config.autoServe,
+  };
+}
+
+function estimateStats(accuracy: Accuracy): EstimateStats {
+  if (accuracy.people === 0) return { people: 0, withinRange: null, averageErrorSeconds: null };
+  return {
+    people: accuracy.people,
+    withinRange: accuracy.withinRange / accuracy.people,
+    averageErrorSeconds: Math.round(accuracy.errorTotalSeconds / accuracy.people),
   };
 }
 

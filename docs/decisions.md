@@ -145,3 +145,23 @@ any failure.
 
 **Why.** The first deploy chained the steps by hand, a type error didn't stop it, and an older
 build went out. Now a deploy can't skip the checks.
+
+## D13. Score every real estimate
+
+**Decision.** When someone joins, their ticket keeps the expected wait they were shown. When
+they're called, the queue scores it against the real wait, using the same "inside the range"
+test as the simulation (`withinRange` in `src/shared/estimate.ts`). Totals are kept for the
+session and for the queue's whole life. A name-free CSV report has the per-ticket data.
+
+**Why.** The simulation says how the estimate should behave; only real lines say how it does.
+Recording it from the first real customer means a trial needs no extra setup to produce a
+number, and the number uses the same definition as the published one. Simulated demo customers
+and people brought back after missing their turn aren't scored.
+
+## D14. Numbers for people without phones
+
+**Decision.** Staff can add someone to the line from the staff screen. Their ticket belongs to
+no device, so nobody can act for it, and they follow their number on the TV.
+
+**Why.** A clinic's waiting room includes people without smartphones. A queue that only works
+for phone owners would push them back to paper, and staff would run two systems.

@@ -55,3 +55,20 @@ export function createDemo(): Promise<CreatedQueue> {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+/** Download the staff report (CSV, no names) through the browser. */
+export async function downloadReport(code: string, staffKey: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/q/${code}/report`, { headers: { Authorization: `Bearer ${staffKey}` } });
+  } catch {
+    throw new ApiError(0, "network", "You seem to be offline. Try again.");
+  }
+  if (!response.ok) throw new ApiError(response.status, "internal", "Couldn't get the report. Try again.");
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `lineless-${code}.csv`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}

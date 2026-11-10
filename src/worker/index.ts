@@ -27,6 +27,7 @@ const device = z.string().min(16).max(64);
 
 const commandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("join"), device, name: z.string().max(200).optional() }),
+  z.object({ type: z.literal("add_ticket"), name: z.string().max(200).optional() }),
   z.object({ type: z.literal("leave"), ticketId: id, device }),
   z.object({ type: z.literal("call_next"), counterId: id, expectServing: id.nullable() }),
   z.object({ type: z.literal("recall"), ticketId: id }),
@@ -47,7 +48,7 @@ const requestSchema = z.object({
   command: commandSchema,
 });
 
-const QUEUE_ROUTE = /^\/api\/q\/([^/]+)(\/commands|\/ws)?$/;
+const QUEUE_ROUTE = /^\/api\/q\/([^/]+)(\/commands|\/ws|\/report)?$/;
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -84,6 +85,18 @@ async function route(request: Request, env: Env): Promise<Response> {
     case "/ws": {
       if (request.headers.get("Upgrade") !== "websocket") return problem(426, "invalid", "Expected a WebSocket.");
       return queue.fetch(request);
+    }
+    case "/report": {
+      if (method !== "GET") return problem(405, "invalid", "Use GET.");
+      const report = await queue.report(bearer(request));
+      if (!report.ok) return problem(report.status, report.code, report.code === "unauthorized" ? "This needs the staff link." : "There's no line with that code.");
+      return new Response(report.csv, {
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="lineless-${code}.csv"`,
+          "Cache-Control": "no-store",
+        },
+      });
     }
     case "/commands": {
       if (method !== "POST") return problem(405, "invalid", "Use POST.");

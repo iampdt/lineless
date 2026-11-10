@@ -65,6 +65,20 @@ describe("staff commands", () => {
   });
 });
 
+describe("adding someone without a phone", () => {
+  it("gives them the next number, for staff only", async () => {
+    const { code, staffKey } = await createQueue();
+    await joinAs(code);
+    expect((await send(code, { type: "add_ticket", name: "Mrs Rao" })).status).toBe(401);
+    const added = await send(code, { type: "add_ticket", name: "Mrs Rao" }, { staffKey });
+    expect(added.body).toMatchObject({ type: "joined", ticket: { number: 2 }, existing: false });
+    // Staff can still add people while joining is paused.
+    await send(code, { type: "set_status", status: "paused" }, { staffKey });
+    expect((await send(code, { type: "add_ticket" }, { staffKey })).status).toBe(200);
+    expect((await view(code)).waiting).toEqual([1, 2, 3]);
+  });
+});
+
 describe("joining", () => {
   it("is idempotent per device and per request id", async () => {
     const { code } = await createQueue();
@@ -214,6 +228,28 @@ describe("live updates", () => {
   });
 });
 
+describe("the staff report", () => {
+  it("needs the staff key, and has every ticket without names", async () => {
+    const { code, staffKey } = await createQueue();
+    await joinAs(code, device(), "Priya Sharma");
+    await joinAs(code, device(), "Arjun Rao");
+    const counter = (await view(code)).counters[0]!;
+    await send(code, { type: "call_next", counterId: counter.id, expectServing: null }, { staffKey });
+
+    expect((await api(`/api/q/${code}/report`)).status).toBe(401);
+    const response = await api(`/api/q/${code}/report`, { headers: { Authorization: `Bearer ${staffKey}` } });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("text/csv");
+    const csv = await response.text();
+    const lines = csv.trim().split("\r\n");
+    expect(lines[0]).toBe("number,status,counter,joined_at,called_at,finished_at,waited_minutes,shown_minutes,within_range,simulated");
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toMatch(/^"1","called","Room 1",/);
+    expect(lines[1]).toContain('"yes"'); // called at once, as shown
+    expect(csv).not.toMatch(/Priya|Arjun/);
+  });
+});
+
 describe("durability", () => {
   it("keeps the queue when its object is evicted from memory", async () => {
     const { code, staffKey } = await createQueue();
@@ -233,6 +269,29 @@ describe("durability", () => {
       { staffKey },
     );
     expect(next.status).toBe(409); // the screen's view (null) is stale: ticket 1 is at the counter
+  });
+
+  it("upgrades a queue stored by the previous version", async () => {
+    const { code, staffKey } = await createQueue();
+    await joinAs(code);
+    // Make it look like the version before estimates were recorded.
+    await runInDurableObject(stub(code), (_instance: QueueObject, state) => {
+      const sql = state.storage.sql;
+      sql.exec("ALTER TABLE tickets DROP COLUMN estimate_seconds");
+      const config = JSON.parse(sql.exec<{ config: string }>("SELECT config FROM queue").one().config);
+      delete config.totals;
+      delete config.session.estimates;
+      sql.exec("UPDATE queue SET config = ?", JSON.stringify(config));
+    });
+    await evictDurableObject(stub(code));
+
+    await joinAs(code);
+    const counter = (await view(code)).counters[0]!;
+    const sent = await send(code, { type: "call_next", counterId: counter.id, expectServing: null }, { staffKey });
+    expect(sent.status).toBe(200);
+    expect((await view(code)).waiting).toEqual([2]);
+    const report = await api(`/api/q/${code}/report`, { headers: { Authorization: `Bearer ${staffKey}` } });
+    expect((await report.text()).trim().split("\r\n")).toHaveLength(3);
   });
 
   it("deletes a queue after a month without activity", async () => {

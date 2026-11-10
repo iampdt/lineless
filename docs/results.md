@@ -110,6 +110,11 @@ from a guess of my own.
 
 ## 4. Tests
 
-40 tests (`npm test`), run inside the Workers runtime with real Durable Objects and SQLite:
+48 tests (`npm test`), run inside the Workers runtime with real Durable Objects and SQLite:
 domain rules and the estimator as plain functions, and the API end to end through the Worker,
-WebSockets, eviction and alarms.
+WebSockets, eviction, alarms, the staff report, and upgrading a queue stored by an older version.
+
+## 5. From a real place
+
+Nothing yet. Every real customer's estimate is now scored against their real wait, so a trial
+will produce a figure to put next to the simulated ones (see [trial.md](trial.md)).

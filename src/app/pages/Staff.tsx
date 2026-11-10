@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { type CommandResult, type Command, LIMITS, type QueueStatus, type QueueView, type StaffView, type TicketView } from "../../shared/protocol";
-import { ApiError, sendCommand } from "../lib/api";
+import { type FormEvent, useEffect, useState } from "react";
+import { type CommandResult, type Command, type EstimateStats, LIMITS, type QueueStatus, type QueueView, type StaffView, type TicketView } from "../../shared/protocol";
+import { ApiError, downloadReport, sendCommand } from "../lib/api";
 import { ago, formatWait, joinUrl, seconds, since } from "../lib/format";
 import { useQueue } from "../lib/socket";
 import { savedCounter, saveCounter, saveStaffKey, staffKey as storedStaffKey } from "../lib/storage";
@@ -78,12 +78,13 @@ export function Staff({ code }: { code: string }) {
         <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
           <div className="space-y-5">
             <CounterPanel code={code} staffKey={key} queue={queue} staff={staff} />
-            <WaitingList queue={queue} staff={staff} receivedAt={receivedAt} />
+            <WaitingList code={code} staffKey={key} queue={queue} staff={staff} receivedAt={receivedAt} />
             {staff.missed.length > 0 && <MissedList code={code} staffKey={key} missed={staff.missed} />}
           </div>
           <aside className="space-y-5">
             {queue.demo ? <DemoPhone code={code} /> : <SharePanel code={code} staffKey={key} />}
             <Stats queue={queue} staff={staff} />
+            <TrialReport code={code} staffKey={key} staff={staff} />
             <CountersEditor code={code} staffKey={key} queue={queue} />
             {queue.demo && <SharePanel code={code} staffKey={key} />}
           </aside>
@@ -207,12 +208,24 @@ function CounterPanel({ code, staffKey, queue, staff }: { code: string; staffKey
   );
 }
 
-function WaitingList({ queue, staff, receivedAt }: { queue: QueueView; staff: StaffView; receivedAt: number }) {
+function WaitingList({
+  code,
+  staffKey,
+  queue,
+  staff,
+  receivedAt,
+}: {
+  code: string;
+  staffKey: string;
+  queue: QueueView;
+  staff: StaffView;
+  receivedAt: number;
+}) {
   const now = useNow(30_000);
   const shown = staff.waiting.slice(0, 50);
   return (
     <section className="card">
-      <div className="flex items-center justify-between border-b border-line px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-4">
         <h2 className="font-semibold">
           Waiting <span className="tabular text-muted">{staff.waiting.length}</span>
         </h2>
@@ -220,6 +233,7 @@ function WaitingList({ queue, staff, receivedAt }: { queue: QueueView; staff: St
           <span className="text-sm text-muted">last in line: {formatWait(staff.waiting.length, queue.pace, receivedAt, now)}</span>
         )}
       </div>
+      {queue.status !== "closed" && <AddWithoutPhone code={code} staffKey={staffKey} />}
       {shown.length === 0 ? (
         <p className="px-5 py-8 text-center text-muted">Nobody's waiting.</p>
       ) : (
@@ -238,6 +252,66 @@ function WaitingList({ queue, staff, receivedAt }: { queue: QueueView; staff: St
         <p className="border-t border-line px-5 py-3 text-sm text-muted">and {staff.waiting.length - shown.length} more</p>
       )}
     </section>
+  );
+}
+
+/** For someone without a smartphone: staff add them and tell them their number. */
+function AddWithoutPhone({ code, staffKey }: { code: string; staffKey: string }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [added, setAdded] = useState<number | null>(null);
+  const { run, busy, error } = useCommand(code, staffKey);
+
+  const add = async (event: FormEvent) => {
+    event.preventDefault();
+    const result = await run({ type: "add_ticket", name: name.trim() || undefined });
+    if (result?.type === "joined") {
+      setAdded(result.ticket.number);
+      setName("");
+    }
+  };
+
+  if (!open) {
+    return (
+      <div className="border-b border-line px-5 py-3">
+        <button type="button" className="btn-quiet -ml-3" onClick={() => setOpen(true)}>
+          + Add someone without a phone
+        </button>
+      </div>
+    );
+  }
+  return (
+    <form onSubmit={add} className="space-y-3 border-b border-line bg-canvas/60 px-5 py-4">
+      {added !== null && (
+        <Notice>
+          Their number is <strong className="tabular text-lg">{added}</strong>. Write it down for them: the TV screen shows it when it's called.
+        </Notice>
+      )}
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <input
+          className="input"
+          aria-label="Their name (optional)"
+          placeholder="Their name (optional)"
+          maxLength={LIMITS.customerName}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <button type="submit" className="btn-primary shrink-0" disabled={busy}>
+          {busy ? "Adding…" : "Give them a number"}
+        </button>
+        <button
+          type="button"
+          className="btn-quiet shrink-0"
+          onClick={() => {
+            setOpen(false);
+            setAdded(null);
+          }}
+        >
+          Done
+        </button>
+      </div>
+      {error && <Notice tone="warn">{error}</Notice>}
+    </form>
   );
 }
 
@@ -328,6 +402,7 @@ function Stats({ queue, staff }: { queue: QueueView; staff: StaffView }) {
     ["Didn't come", String(stats.missed)],
     ["Left the line", String(stats.left)],
     ["Pace now", `a call every ${seconds(queue.pace.secondsPerTicket)}`],
+    ["Wait estimates right", accuracy(stats.estimates)],
   ];
   return (
     <section className="card p-5">
@@ -344,6 +419,60 @@ function Stats({ queue, staff }: { queue: QueueView; staff: StaffView }) {
   );
 }
 
+/** "84% of 37", or a dash before anyone has been called. */
+function accuracy(estimates: EstimateStats): string {
+  if (estimates.withinRange === null) return "—";
+  return `${Math.round(estimates.withinRange * 100)}% of ${estimates.people}`;
+}
+
+/** Everything a trial needs to report honestly: totals over the line's life and the raw data. */
+function TrialReport({ code, staffKey, staff }: { code: string; staffKey: string; staff: StaffView }) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const { totals } = staff;
+  const download = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await downloadReport(code, staffKey);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Couldn't get the report.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="card p-5">
+      <h2 className="font-semibold">Since the line was created</h2>
+      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+        <div>
+          <dt className="text-muted">Served</dt>
+          <dd className="tabular font-semibold">{totals.served}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">Wait estimates right</dt>
+          <dd className="tabular font-semibold">{accuracy(totals.estimates)}</dd>
+        </div>
+        <div className="col-span-2">
+          <dt className="text-muted">Estimates off by, on average</dt>
+          <dd className="tabular font-semibold">{seconds(totals.estimates.averageErrorSeconds)}</dd>
+        </div>
+      </dl>
+      <p className="mt-3 text-xs text-muted">
+        “Right” means the real wait fell inside the range shown when the person joined, give or take a minute.
+      </p>
+      <button type="button" className="btn-secondary mt-4 w-full" disabled={busy} onClick={download}>
+        {busy ? "Preparing…" : "Download the report (CSV, no names)"}
+      </button>
+      {error && (
+        <div className="mt-3">
+          <Notice tone="warn">{error}</Notice>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function SharePanel({ code, staffKey }: { code: string; staffKey: string }) {
   const join = joinUrl(code);
   return (
@@ -354,6 +483,9 @@ function SharePanel({ code, staffKey }: { code: string; staffKey: string }) {
       <p className="text-center font-mono text-2xl font-bold tracking-[0.3em]">{code}</p>
       <div className="mt-4 grid gap-2">
         <CopyButton text={join} label="Copy the join link" />
+        <a className="btn-secondary" href={`/q/${code}/poster`} target="_blank" rel="noreferrer">
+          Print a poster
+        </a>
         <a className="btn-secondary" href={`/q/${code}/display`} target="_blank" rel="noreferrer">
           Open the TV screen
         </a>

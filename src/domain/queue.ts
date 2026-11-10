@@ -4,14 +4,25 @@
 // persisting, which is why two commands can never interleave (docs/architecture.md).
 
 import { type Command, type CommandResult, type ErrorCode, LIMITS } from "../shared/protocol";
+import { expectedWait, withinRange } from "../shared/estimate";
 import {
   DEFAULT_ESTIMATOR,
   type EstimatorOptions,
   initialEstimator,
+  pace,
   recordService,
   trackLine,
 } from "./estimate";
-import { type Counter, type QueueConfig, type QueueState, type Session, type Ticket, waitingInOrder } from "./model";
+import {
+  type Accuracy,
+  type Counter,
+  emptyAccuracy,
+  type QueueConfig,
+  type QueueState,
+  type Session,
+  type Ticket,
+  waitingInOrder,
+} from "./model";
 
 export interface ApplyContext {
   now: number;
@@ -72,12 +83,23 @@ export function createQueue(input: NewQueue, now: number, newId: () => string): 
     estimator: initialEstimator(input.serviceMinutes * 60, now),
     lastActivityAt: now,
     autoServe: false,
+    totals: { served: 0, estimates: emptyAccuracy() },
   };
   return { config, tickets: new Map() };
 }
 
 function newSession(now: number): Session {
-  return { startedAt: now, served: 0, missed: 0, left: 0, waitTotalMs: 0, waitCount: 0, serviceTotalMs: 0, serviceCount: 0 };
+  return {
+    startedAt: now,
+    served: 0,
+    missed: 0,
+    left: 0,
+    waitTotalMs: 0,
+    waitCount: 0,
+    serviceTotalMs: 0,
+    serviceCount: 0,
+    estimates: emptyAccuracy(),
+  };
 }
 
 /** Accumulates one command's changes on copies, leaving the original state untouched. */
@@ -138,6 +160,7 @@ class Draft {
     this.update(ticket, { status: "served", finishedAt: now });
     const session = this.config.session;
     session.served += 1;
+    this.config.totals.served += 1;
     if (ticket.calledAt !== null) {
       session.serviceTotalMs += now - ticket.calledAt;
       session.serviceCount += 1;
@@ -209,27 +232,15 @@ function run(d: Draft, command: Command): CommandResult {
       }
       if (config.status === "paused") throw new DomainError("queue_paused", "This line isn't taking new people right now.");
       if (config.status === "closed") throw new DomainError("queue_closed", "This line is closed.");
-      const limit = config.demo ? LIMITS.demoWaiting : LIMITS.waiting;
-      if (waitingInOrder(d).length >= limit) throw new DomainError("queue_full", "This line is full.");
+      const ticket = issue(d, command.name ?? "", deviceHash);
+      return { type: "joined", ticket: { id: ticket.id, number: ticket.number }, existing: false };
+    }
 
-      const ticket: Ticket = {
-        id: d.ctx.newId(),
-        number: config.nextNumber,
-        name: cleanName(command.name ?? "", LIMITS.customerName),
-        deviceHash,
-        status: "waiting",
-        counterId: null,
-        order: config.nextOrder,
-        joinedAt: now,
-        calledAt: null,
-        finishedAt: null,
-        recalls: 0,
-        simulated: d.ctx.simulated ?? false,
-      };
-      config.nextNumber += 1;
-      config.nextOrder += 1;
-      d.insert(ticket);
-      d.event("joined", ticket.id);
+    case "add_ticket": {
+      // Someone without a phone, added at the desk. They get a number to note down; nobody's
+      // device can act for their ticket. Staff may still add people while joining is paused.
+      if (config.status === "closed") throw new DomainError("queue_closed", "This line is closed.");
+      const ticket = issue(d, command.name ?? "", `desk:${d.ctx.newId()}`);
       return { type: "joined", ticket: { id: ticket.id, number: ticket.number }, existing: false };
     }
 
@@ -262,6 +273,11 @@ function run(d: Draft, command: Command): CommandResult {
       counter.lastActiveAt = now;
       config.session.waitTotalMs += now - next.joinedAt;
       config.session.waitCount += 1;
+      if (next.estimateSeconds !== null) {
+        const actual = (now - next.joinedAt) / 1000;
+        score(config.session.estimates, next.estimateSeconds, actual);
+        score(config.totals.estimates, next.estimateSeconds, actual);
+      }
       d.event("called", next.id, counter.id);
       return { type: "called", ticket: { id: next.id, number: next.number } };
     }
@@ -296,7 +312,8 @@ function run(d: Draft, command: Command): CommandResult {
       // Back to the front: they were called once already.
       const front = waitingInOrder(d)[0];
       const order = front ? front.order - 1 : config.nextOrder++;
-      d.update(ticket, { status: "waiting", order, counterId: null, calledAt: null, finishedAt: null });
+      // Their wait no longer compares with the estimate they were shown.
+      d.update(ticket, { status: "waiting", order, counterId: null, calledAt: null, finishedAt: null, estimateSeconds: null });
       d.event("brought_back", ticket.id);
       return OK;
     }
@@ -336,6 +353,44 @@ function run(d: Draft, command: Command): CommandResult {
       return OK;
     }
   }
+}
+
+/** Put a new ticket at the back of the line, remembering the wait it was shown. */
+function issue(d: Draft, name: string, deviceHash: string): Ticket {
+  const { config } = d;
+  const { now } = d.ctx;
+  const limit = config.demo ? LIMITS.demoWaiting : LIMITS.waiting;
+  const ahead = waitingInOrder(d).length;
+  if (ahead >= limit) throw new DomainError("queue_full", "This line is full.");
+  // Remember the wait this person is shown, to score it against the real one later.
+  const shown = pace(config.estimator, config.counters, (id) => d.tickets.get(id)?.calledAt ?? null, now);
+  const ticket: Ticket = {
+    id: d.ctx.newId(),
+    number: config.nextNumber,
+    name: cleanName(name, LIMITS.customerName),
+    deviceHash,
+    status: "waiting",
+    counterId: null,
+    order: config.nextOrder,
+    joinedAt: now,
+    calledAt: null,
+    finishedAt: null,
+    recalls: 0,
+    simulated: d.ctx.simulated ?? false,
+    // Simulated demo customers aren't scored: their history is made up.
+    estimateSeconds: d.ctx.simulated ? null : Math.round(expectedWait(ahead + 1, shown)),
+  };
+  config.nextNumber += 1;
+  config.nextOrder += 1;
+  d.insert(ticket);
+  d.event("joined", ticket.id);
+  return ticket;
+}
+
+function score(accuracy: Accuracy, estimateSeconds: number, actualSeconds: number): void {
+  accuracy.people += 1;
+  if (withinRange(estimateSeconds, actualSeconds)) accuracy.withinRange += 1;
+  accuracy.errorTotalSeconds += Math.abs(actualSeconds - estimateSeconds);
 }
 
 function requireDevice(ctx: ApplyContext): string {

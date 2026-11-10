@@ -179,6 +179,58 @@ describe("opening and closing", () => {
   });
 });
 
+describe("scoring the wait shown", () => {
+  const minute = 60_000;
+
+  it("records the wait shown at joining and scores it when the person is called", () => {
+    let state = setup(["Room 1"]);
+    state = join(state, "a", 0);
+    state = join(state, "b", 0);
+    const [a, b] = waitingInOrder(state);
+    expect(a!.estimateSeconds).toBe(0); // the room is free: called at once
+    expect(b!.estimateSeconds).toBe(300); // one 5-minute service first
+    state = callNext(state, 0, 1_000);
+    state = callNext(state, 0, 4 * minute); // b waited 4 minutes against 5 shown: inside the range
+    expect(state.config.totals.estimates).toMatchObject({ people: 2, withinRange: 2 });
+    expect(state.config.session.estimates.people).toBe(2);
+  });
+
+  it("counts a wait far outside the range as wrong", () => {
+    let state = setup(["Room 1"]);
+    state = join(state, "a", 0);
+    state = join(state, "b", 0);
+    state = callNext(state, 0, 1_000);
+    state = callNext(state, 0, 30 * minute); // 30 minutes against 5 shown
+    expect(state.config.totals.estimates).toMatchObject({ people: 2, withinRange: 1 });
+  });
+
+  it("doesn't score someone brought back after missing their turn", () => {
+    let state = setup(["Room 1"]);
+    state = join(state, "a", 0);
+    state = callNext(state, 0, 1_000);
+    const ticket = state.config.counters[0]!.serving!;
+    state = step(state, { type: "no_show", ticketId: ticket }, 2 * minute);
+    state = step(state, { type: "bring_back", ticketId: ticket }, 3 * minute);
+    expect(state.tickets.get(ticket)!.estimateSeconds).toBeNull();
+    state = callNext(state, 0, 4 * minute);
+    expect(state.config.totals.estimates.people).toBe(1);
+  });
+
+  it("doesn't score the demo's simulated customers", () => {
+    const outcome = apply(setup(), { type: "join", device: "sim" }, { now: 0, newId, deviceHash: "sim", simulated: true });
+    expect(outcome.ok && [...outcome.state.tickets.values()][0]!.estimateSeconds).toBeNull();
+  });
+
+  it("keeps lifetime totals when a new session starts", () => {
+    let state = callNext(join(setup(["Room 1"]), "a", 0), 0, 1_000);
+    state = callNext(state, 0, 2_000); // serve a
+    state = step(state, { type: "set_status", status: "closed" });
+    state = step(state, { type: "set_status", status: "open" });
+    expect(state.config.session.served).toBe(0);
+    expect(state.config.totals).toMatchObject({ served: 1, estimates: { people: 1 } });
+  });
+});
+
 describe("views", () => {
   it("never puts names in the public view", () => {
     const state = callNext(join(join(setup(), "a", 1, "Priya Sharma"), "b", 2, "Arjun Rao"));

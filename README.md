@@ -22,8 +22,10 @@ Lineless needs a QR code at the door and a phone or laptop at the desk:
   an estimated wait that learns from how fast the line really moves, and what each counter is
   serving. When it's their turn: a chime, a vibration and a full-screen "Go to Room 2".
 - **Staff** press "Call next" at their counter. They can call someone again, mark them as not
-  having come, bring them back to the front, pause new joins, and close for the day.
+  having come, bring them back to the front, give a number to someone without a phone, pause
+  new joins, and close for the day.
 - **A TV in the waiting room** shows who's being served where, who's next, and the QR code.
+- **A printable poster** puts the QR code on the door.
 
 | | |
 | --- | --- |
@@ -49,7 +51,8 @@ Commands go over HTTP; state comes back over WebSockets as full snapshots with a
 phone that drops off and reconnects needs no catch-up: the first message is the truth.
 
 The details are in [docs/architecture.md](docs/architecture.md), the reasoning in
-[docs/decisions.md](docs/decisions.md), and the endpoints in [docs/api.md](docs/api.md).
+[docs/decisions.md](docs/decisions.md), the endpoints in [docs/api.md](docs/api.md), and how to run
+a real trial in [docs/trial.md](docs/trial.md).
 
 ## The parts worth a closer look
 
@@ -77,6 +80,11 @@ showed why, and the fix is in [docs/results.md](docs/results.md).
 all 20,000 updates delivered, **160 ms** median and **231 ms** at the 99th percentile from the
 press to a phone, measured from Bangalore, network included.
 
+**Measured in the field, not just in simulation.** Every real customer's wait is scored against
+the range they were shown when they joined. The staff screen keeps the running figure, and a
+name-free CSV report has one row per ticket, so a trial at a real clinic produces real numbers.
+[docs/trial.md](docs/trial.md) is the checklist for running one.
+
 **Built to be left alone.**
 - Idle queues cost nothing: sockets hibernate, and keep-alives are answered without waking the queue.
 - Demo queues expire after a day and idle queues after 30 days.
@@ -88,7 +96,7 @@ press to a phone, measured from Bangalore, network included.
 ```bash
 npm install
 npm run dev        # app and API on http://localhost:5173, Durable Objects running locally
-npm test           # 40 tests inside the Workers runtime, with real Durable Objects and SQLite
+npm test           # 48 tests inside the Workers runtime, with real Durable Objects and SQLite
 npm run check      # types, tests, build
 npm run simulate   # the wait-estimate simulation
 npm run loadtest -- --url http://localhost:5173 --sockets 500 --calls 20
@@ -103,10 +111,10 @@ Deploying needs a Cloudflare account (the free plan is enough) and `npx wrangler
 src/domain/    the queue: state machine, views, wait estimator (no runtime dependencies)
 src/shared/    the wire protocol and the wait range, used by both sides
 src/worker/    the Worker, the queue's Durable Object, storage, rate limits, the demo
-src/app/       the React app: home, customer, staff and display pages
+src/app/       the React app: home, customer, staff, display and poster pages
 test/          domain and end-to-end tests
 scripts/       the wait simulation and the load test
-docs/          architecture, decisions, API, results
+docs/          architecture, decisions, API, results, running a trial
 ```
 
 ## What it doesn't do (yet)

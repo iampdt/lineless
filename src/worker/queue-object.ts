@@ -30,12 +30,14 @@ import {
   readRequest,
   readState,
   readTicket,
+  reportRows,
   saveConfig,
   saveEvents,
   saveRequest,
   saveTickets,
 } from "./storage";
 import { simulatedArrival, simulatedCalls, seedDemo } from "./demo";
+import { reportCsv } from "./report";
 
 type Attachment = { role: "public" } | { role: "staff" } | { role: "customer"; ticketId: string };
 
@@ -114,6 +116,15 @@ export class QueueObject extends DurableObject<Env> {
   async view(): Promise<QueueView | null> {
     const state = this.load();
     return state ? queueView(state, Date.now()) : null;
+  }
+
+  /** The staff report as CSV, or null without the right staff key or queue. */
+  async report(staffKey: string | null): Promise<{ ok: true; csv: string } | { ok: false; status: number; code: ErrorCode }> {
+    const staffHash = staffKey ? await sha256(staffKey) : null;
+    const state = this.load();
+    if (!state) return { ok: false, status: 404, code: "not_found" };
+    if (!staffHash || !sameDigest(staffHash, state.config.staffKeyHash)) return { ok: false, status: 401, code: "unauthorized" };
+    return { ok: true, csv: reportCsv(reportRows(this.sql), state.config.counters) };
   }
 
   async run(request: CommandRequest, staffKey: string | null, client: string): Promise<CommandReply> {
