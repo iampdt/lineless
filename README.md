@@ -4,7 +4,7 @@
 long it'll be, and get called when it's their turn. No app, no sign-up, nobody shouting names
 across a crowded room.
 
-**Live demo: [lineless.lineless.workers.dev](https://lineless.lineless.workers.dev)**. Press
+**Live demo: [lineless.iampdt.workers.dev](https://lineless.iampdt.workers.dev)**. Press
 "Try the live demo", join the line on the phone next to the staff screen, then press "Call next"
 until it's the phone's turn. Or scan the QR code with your own phone.
 
